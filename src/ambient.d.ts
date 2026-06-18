@@ -8,9 +8,19 @@ declare global {
         stretch: number
     }
 
+    interface GoogleMetadata {
+        category: string
+        popularity: number
+        trending: number
+        dateAdded: string
+        subsets: string[]
+    }
+
     interface FontFamily {
         family_name: string
         fonts: Font[]
+        source?: "google"
+        google?: GoogleMetadata
     }
 }
 

@@ -11,24 +11,27 @@
     import FontStyleToggle from "$lib/components/font-style-toggle.svelte"
 
     import DarkModeToggle from "$lib/components/dark-mode-toggle.svelte"
+    import { Separator } from "$lib/components/ui/separator/index.js"
 </script>
 
-<Sidebar.Provider class="max-w-full" open={false}>
+<Sidebar.Provider class="max-w-full">
     <AppSidebar />
-    <main class="h-screen w-full flex flex-col min-w-0">
-        <div class="flex items-center justify-between gap-4 p-2 border-b">
-            <div class="flex items-center gap-2">
+    <main class="flex h-screen w-full min-w-0 flex-col">
+        <div
+            class="flex items-center justify-between gap-4 border-b bg-background/80 p-2 backdrop-blur"
+        >
+            <div class="flex flex-1 items-center gap-2">
                 <Sidebar.Trigger />
                 <FontSearch />
             </div>
 
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1">
                 <FontSizeSlider />
                 <FontWeightSlider />
                 <FontStyleToggle />
+                <Separator orientation="vertical" class="mx-1 h-6" />
+                <DarkModeToggle />
             </div>
-            
-            <DarkModeToggle />
         </div>
         <FontList />
     </main>

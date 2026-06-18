@@ -7,15 +7,70 @@
     import FamilyPreview from "./family-preview.svelte"
 
     import { previewOptions } from "$lib/stores/preview-options"
-    import { fontFilters, FontSource } from "$lib/stores/font-filters"
+    import {
+        fontFilters,
+        FontSource,
+        FontCategory,
+        FontSort,
+    } from "$lib/stores/font-filters"
+    import { listGoogleFonts } from "$lib/data/google-fonts"
+    import { pinnedFonts } from "$lib/stores/pins"
+    import { fontStats, googleLoading } from "$lib/stores/font-stats"
+    import { LoaderCircle } from "lucide-svelte"
     import { tick } from "svelte"
 
     let scrollElement = $state<HTMLElement | null>(null)
 
     let installed_families = $state<FontFamily[]>([])
+    let google_families = $state<FontFamily[]>([])
+
+    let installed_paths = $derived(
+        new Map(
+            installed_families.flatMap((f) => {
+                const path = f.fonts.find((font) => font.path.length > 0)?.path
+                return path ? [[f.family_name.toLowerCase(), path]] : []
+            })
+        )
+    )
+
+    let source_families = $derived(
+        $fontFilters.source === FontSource.GoogleFonts
+            ? google_families
+            : installed_families
+    )
+
+    $effect(() => {
+        const categories: Record<string, number> = {}
+        const languages: Record<string, number> = {}
+        for (const family of google_families) {
+            const category = family.google?.category
+            if (category) {
+                categories[category] = (categories[category] ?? 0) + 1
+            }
+            for (const subset of family.google?.subsets ?? []) {
+                languages[subset] = (languages[subset] ?? 0) + 1
+            }
+        }
+        fontStats.set({
+            all: installed_families.length,
+            system: installed_families.filter((f) =>
+                f.fonts.some((font) =>
+                    font.path.toLowerCase().includes("c:\\windows")
+                )
+            ).length,
+            user: installed_families.filter((f) =>
+                f.fonts.some((font) =>
+                    font.path.toLowerCase().includes("c:\\users")
+                )
+            ).length,
+            google: google_families.length,
+            categories,
+            languages,
+        })
+    })
 
     let filtered_families = $derived(
-        installed_families.filter((family) => {
+        source_families.filter((family) => {
             switch ($fontFilters.source) {
                 case FontSource.System:
                     if (
@@ -36,13 +91,125 @@
                     }
                     break
                 case FontSource.GoogleFonts:
-                    return false
+                    if (
+                        $fontFilters.category !== FontCategory.All &&
+                        family.google?.category !== $fontFilters.category
+                    ) {
+                        return false
+                    }
+                    if (
+                        $fontFilters.language !== "" &&
+                        !family.google?.subsets.includes($fontFilters.language)
+                    ) {
+                        return false
+                    }
+                    break
             }
             return family.family_name
                 .toLowerCase()
                 .includes($fontFilters.search.toLowerCase())
         })
     )
+
+    let sorted_families = $derived(
+        $fontFilters.source !== FontSource.GoogleFonts
+            ? filtered_families
+            : [...filtered_families].sort((a, b) => {
+                  switch ($fontFilters.sort) {
+                      case FontSort.Trending:
+                          return (
+                              (a.google?.trending ?? Infinity) -
+                              (b.google?.trending ?? Infinity)
+                          )
+                      case FontSort.Popular:
+                          return (
+                              (a.google?.popularity ?? Infinity) -
+                              (b.google?.popularity ?? Infinity)
+                          )
+                      case FontSort.Newest:
+                          return (b.google?.dateAdded ?? "").localeCompare(
+                              a.google?.dateAdded ?? ""
+                          )
+                      case FontSort.Name:
+                          return a.family_name.localeCompare(b.family_name)
+                  }
+              })
+    )
+
+    let pinned_families = $derived(
+        sorted_families.filter((f) => $pinnedFonts.includes(f.family_name))
+    )
+    let unpinned_families = $derived(
+        sorted_families.filter((f) => !$pinnedFonts.includes(f.family_name))
+    )
+
+    let containerEl = $state<HTMLElement | null>(null)
+    let pinnedHeight = $state(240)
+
+    // Measure the natural height of the pinned rows so the panel never reserves
+    // more space than its content needs.
+    let pinnedContentEl = $state<HTMLElement | null>(null)
+    let pinnedContentHeight = $state(0)
+    let pinnedRowHeight = $state(0)
+
+    $effect(() => {
+        const el = pinnedContentEl
+        if (!el) return
+        const measure = () => {
+            pinnedContentHeight = el.scrollHeight
+            pinnedRowHeight =
+                (el.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0
+        }
+        const observer = new ResizeObserver(measure)
+        observer.observe(el)
+        measure()
+        return () => observer.disconnect()
+    })
+
+    let effectivePinnedHeight = $derived(
+        pinnedContentHeight > 0
+            ? Math.min(pinnedHeight, pinnedContentHeight)
+            : pinnedHeight
+    )
+
+    function startResize(event: PointerEvent) {
+        event.preventDefault()
+        const startY = event.clientY
+        const startHeight = pinnedHeight
+        const min = pinnedRowHeight || 80
+        const max = Math.max(min, (containerEl?.clientHeight ?? 600) - 120)
+
+        function move(e: PointerEvent) {
+            const next = startHeight + (e.clientY - startY)
+            pinnedHeight = Math.max(min, Math.min(next, max))
+        }
+        function up() {
+            window.removeEventListener("pointermove", move)
+            window.removeEventListener("pointerup", up)
+        }
+        window.addEventListener("pointermove", move)
+        window.addEventListener("pointerup", up)
+    }
+
+    let googleError = $state(false)
+
+    $effect(() => {
+        if (
+            $fontFilters.source === FontSource.GoogleFonts &&
+            google_families.length === 0 &&
+            !$googleLoading
+        ) {
+            googleLoading.set(true)
+            googleError = false
+            listGoogleFonts()
+                .then((families) => (google_families = families))
+                .catch((error) => {
+                    googleError = true
+                    console.error("Failed to load Google Fonts", error)
+                })
+                .finally(() => googleLoading.set(false))
+        }
+    })
 
     previewOptions.subscribe(async (options) => {
         if (scrollElement) {
@@ -54,32 +221,111 @@
         }
     })
 
-    invoke<Font[]>("list_fonts").then((fonts) => {
-        fonts.forEach((font) => {
-            const family = installed_families.find(
-                (f) => f.family_name === font.family_name
-            )
-            if (family) {
-                family.fonts.push(font)
-            } else {
-                installed_families.push({
-                    family_name: font.family_name,
-                    fonts: [font],
-                })
-            }
+    function loadInstalledFonts() {
+        invoke<Font[]>("list_fonts").then((fonts) => {
+            const families: FontFamily[] = []
+            fonts.forEach((font) => {
+                const family = families.find(
+                    (f) => f.family_name === font.family_name
+                )
+                if (family) {
+                    family.fonts.push(font)
+                } else {
+                    families.push({
+                        family_name: font.family_name,
+                        fonts: [font],
+                    })
+                }
+            })
+            installed_families = families
         })
-    })
+    }
+
+    loadInstalledFonts()
+
+    // DirectWrite caches its font collection per-process, so a font installed
+    // this session won't appear on re-enumeration. Merge it into the local
+    // list directly using the family metadata and the installed file paths.
+    function registerInstalled(family: FontFamily, paths: string[]) {
+        const fonts: Font[] = family.fonts.map((font, i) => ({
+            ...font,
+            path: paths[i] ?? paths[0] ?? "",
+        }))
+        const existing = installed_families.find(
+            (f) => f.family_name === family.family_name
+        )
+        if (existing) {
+            existing.fonts = fonts
+            installed_families = [...installed_families]
+        } else {
+            installed_families = [
+                ...installed_families,
+                { family_name: family.family_name, fonts },
+            ]
+        }
+    }
 </script>
 
-<ScrollArea bind:viewportRef={scrollElement} orientation="vertical">
-    {#each filtered_families as family, i}
+{#snippet group(list: FontFamily[])}
+    {#each list as family, i (family.family_name)}
         {#if i > 0}
             <Separator />
         {/if}
-        <FamilyPreview {family} />
-    {:else}
-        <div class="pl-5 pt-1 font-semibold text-muted-foreground">
-            No fonts found
-        </div>
+        <FamilyPreview
+            {family}
+            {installed_paths}
+            oninstalled={(paths) => registerInstalled(family, paths)}
+        />
     {/each}
-</ScrollArea>
+{/snippet}
+
+<div bind:this={containerEl} class="flex min-h-0 flex-1 flex-col">
+    {#if $googleLoading && sorted_families.length === 0}
+        <div
+            class="flex items-center gap-2 px-5 py-4 text-sm text-muted-foreground"
+        >
+            <LoaderCircle class="size-4 animate-spin" />
+            Loading Google Fonts...
+        </div>
+    {:else if googleError && sorted_families.length === 0}
+        <div class="px-5 py-4 text-sm text-muted-foreground">
+            Couldn't load Google Fonts. Check your connection and try again.
+        </div>
+    {:else if sorted_families.length === 0}
+        <div class="px-5 py-4 text-sm text-muted-foreground">No fonts found</div>
+    {:else}
+        {#if pinned_families.length > 0}
+            <div
+                class="shrink-0 overflow-hidden"
+                style="height: {effectivePinnedHeight}px"
+            >
+                <ScrollArea orientation="vertical" class="h-full">
+                    <div bind:this={pinnedContentEl}>
+                        {@render group(pinned_families)}
+                    </div>
+                </ScrollArea>
+            </div>
+            <div
+                role="separator"
+                aria-orientation="horizontal"
+                tabindex="-1"
+                title="Drag to resize the pinned area"
+                class="group/handle flex h-2 shrink-0 cursor-row-resize items-center justify-center border-y bg-border/30 transition-colors hover:bg-border"
+                onpointerdown={startResize}
+            >
+                <div
+                    class="h-0.5 w-8 rounded-full bg-muted-foreground/40 transition-colors group-hover/handle:bg-muted-foreground"
+                ></div>
+            </div>
+        {/if}
+        <div class="min-h-0 flex-1">
+            <ScrollArea
+                bind:viewportRef={scrollElement}
+                orientation="vertical"
+                class="h-full"
+            >
+                {@render group(unpinned_families)}
+            </ScrollArea>
+        </div>
+    {/if}
+</div>
