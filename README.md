@@ -12,20 +12,23 @@ A lightweight font viewer app built with Tauri, SvelteKit, TypeScript, and Tailw
 - Filter fonts by name & source (System/User)
 - Browse Google Fonts and install them with one click
 - Filter Google Fonts by category, language, and sort order
+- Find visually similar installed fonts, ranked by a similarity score, fully offline
 - Pin fonts to the top to compare them against others as you scroll
 - Customize font size, weight, and style
 - Custom text preview
 - Copy a font's name or reveal its file in the explorer
 
+Similarity is computed locally by rasterizing the previewed glyphs with
+[fontdue](https://github.com/mooman219/fontdue) and comparing perceptual hashes
+([image_hasher](https://github.com/abonander/img_hash)).
+
 ## Wishlist
 
-- Rasterize fonts in backend using [fontdue](https://github.com/mooman219/fontdue)
-- Compare fonts (glyphs & custom text) using [dssim](https://github.com/kornelski/dssim)
-- Sort fonts by similarity
 - Expand a family to preview every weight & style at once
 - Variable font axis controls (weight, width, slant, …)
 - Uninstall fonts from within the app
 - Remember preview settings & filters between sessions
+- Persist the similarity hash cache between sessions
 
 ## Screenshots
 

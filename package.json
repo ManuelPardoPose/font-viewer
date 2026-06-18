@@ -1,7 +1,7 @@
 {
   "name": "font-viewer",
-  "version": "0.2.0",
-  "description": "",
+  "version": "0.3.0",
+  "description": "A lightweight desktop app for browsing, comparing, and installing fonts.",
   "type": "module",
   "scripts": {
     "dev": "vite dev",

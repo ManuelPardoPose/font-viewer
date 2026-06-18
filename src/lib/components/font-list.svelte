@@ -16,8 +16,14 @@
     import { listGoogleFonts } from "$lib/data/google-fonts"
     import { pinnedFonts } from "$lib/stores/pins"
     import { fontStats, googleLoading } from "$lib/stores/font-stats"
-    import { LoaderCircle } from "lucide-svelte"
-    import { tick } from "svelte"
+    import {
+        findSimilarFonts,
+        cancelSimilarity,
+        newJobId,
+    } from "$lib/data/similarity"
+    import { LoaderCircle, X } from "lucide-svelte"
+    import { tick, untrack } from "svelte"
+    import { get } from "svelte/store"
 
     let scrollElement = $state<HTMLElement | null>(null)
 
@@ -191,6 +197,108 @@
         window.addEventListener("pointerup", up)
     }
 
+    // --- Similarity comparison ---------------------------------------------
+    let similarityTarget = $state<string | null>(null)
+    let similarityDone = $state(0)
+    let similarityTotal = $state(0)
+    let similarityScores = $state<Map<string, number>>(new Map())
+
+    // Raw incoming results, flushed into the reactive state on a timer so the
+    // list doesn't re-sort on every streamed message.
+    let pendingScores = new Map<string, number>()
+    let pendingDone = 0
+    let flushTimer: ReturnType<typeof setTimeout> | undefined
+    let currentJob = 0
+
+    function flushSimilarity() {
+        flushTimer = undefined
+        similarityScores = new Map(pendingScores)
+        similarityDone = pendingDone
+    }
+
+    function startSimilar(family: string) {
+        if (similarityTarget) {
+            cancelSimilarity(currentJob)
+        }
+        currentJob = newJobId()
+        similarityTarget = family
+        pendingScores = new Map()
+        pendingDone = 0
+        similarityScores = new Map()
+        similarityDone = 0
+        similarityTotal = 0
+
+        const job = currentJob
+        const options = get(previewOptions)
+        findSimilarFonts(
+            family,
+            options.text,
+            options.fontWeight,
+            options.fontStyle === "italic",
+            job,
+            (event) => {
+            if (job !== currentJob) return
+            switch (event.event) {
+                case "started":
+                    similarityTotal = event.data.total
+                    break
+                case "result":
+                    if (event.data.score !== null) {
+                        pendingScores.set(event.data.family, event.data.score)
+                    }
+                    pendingDone += 1
+                    if (!flushTimer) {
+                        flushTimer = setTimeout(flushSimilarity, 100)
+                    }
+                    break
+                case "done":
+                case "cancelled":
+                    flushSimilarity()
+                    break
+            }
+        })
+    }
+
+    function stopSimilar() {
+        if (similarityTarget) {
+            cancelSimilarity(currentJob)
+        }
+        currentJob = 0
+        similarityTarget = null
+    }
+
+    // Leaving the similarity view when the user switches source keeps things
+    // unambiguous.
+    $effect(() => {
+        $fontFilters.source
+        untrack(() => {
+            if (similarityTarget) {
+                stopSimilar()
+            }
+        })
+    })
+
+    let similar_target_family = $derived(
+        similarityTarget
+            ? installed_families.find((f) => f.family_name === similarityTarget)
+            : undefined
+    )
+    let similar_results = $derived(
+        [...similarityScores.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .flatMap(([name, score]) => {
+                const family = installed_families.find(
+                    (f) => f.family_name === name
+                )
+                return family ? [{ family, score }] : []
+            })
+    )
+    let similarityProgress = $derived(
+        similarityTotal > 0
+            ? Math.min(100, (similarityDone / similarityTotal) * 100)
+            : 0
+    )
+
     let googleError = $state(false)
 
     $effect(() => {
@@ -275,12 +383,65 @@
             {family}
             {installed_paths}
             oninstalled={(paths) => registerInstalled(family, paths)}
+            onfindsimilar={() => startSimilar(family.family_name)}
         />
     {/each}
 {/snippet}
 
 <div bind:this={containerEl} class="flex min-h-0 flex-1 flex-col">
-    {#if $googleLoading && sorted_families.length === 0}
+    {#if similarityTarget}
+        <div class="relative overflow-hidden border-b px-5 py-2 text-sm">
+            <div
+                class="absolute inset-y-0 left-0 bg-accent transition-[width] duration-200 ease-out"
+                style="width: {similarityProgress}%"
+            ></div>
+            <div class="relative flex items-center gap-2">
+                <span>
+                    Similar to
+                    <span class="font-semibold">{similarityTarget}</span>
+                </span>
+                <span class="tabular-nums text-muted-foreground">
+                    {similarityDone}/{similarityTotal}
+                </span>
+                {#if similarityTotal === 0 || similarityDone < similarityTotal}
+                    <LoaderCircle
+                        class="size-4 animate-spin text-muted-foreground"
+                    />
+                {/if}
+                <button
+                    onclick={stopSimilar}
+                    title="Close comparison"
+                    class="ml-auto flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                    <X class="size-4" />
+                    Close
+                </button>
+            </div>
+        </div>
+        <div class="min-h-0 flex-1">
+            <ScrollArea orientation="vertical" class="h-full">
+                {#if similar_target_family}
+                    <FamilyPreview
+                        family={similar_target_family}
+                        {installed_paths}
+                    />
+                    <Separator />
+                {/if}
+                {#each similar_results as item, i (item.family.family_name)}
+                    {#if i > 0}
+                        <Separator />
+                    {/if}
+                    <FamilyPreview
+                        family={item.family}
+                        {installed_paths}
+                        score={item.score}
+                        onfindsimilar={() =>
+                            startSimilar(item.family.family_name)}
+                    />
+                {/each}
+            </ScrollArea>
+        </div>
+    {:else if $googleLoading && sorted_families.length === 0}
         <div
             class="flex items-center gap-2 px-5 py-4 text-sm text-muted-foreground"
         >

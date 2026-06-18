@@ -11,15 +11,19 @@
         TriangleAlert,
         FolderOpen,
         Pin,
+        ScanSearch,
     } from "lucide-svelte"
 
     interface Props {
         family: FontFamily
         installed_paths?: Map<string, string>
         oninstalled?: (paths: string[]) => void
+        onfindsimilar?: () => void
+        score?: number
     }
 
-    let { family, installed_paths, oninstalled }: Props = $props()
+    let { family, installed_paths, oninstalled, onfindsimilar, score }: Props =
+        $props()
 
     let isInView = $state(false)
     let fontReady = $state(family.source !== "google")
@@ -125,51 +129,71 @@
             </span>
         {/if}
 
-        <div class="ml-auto flex items-center gap-1">
-            {#if family.source === "google"}
-                {#if isInstalled && fontPath}
+        <div class="ml-auto flex items-center gap-3">
+            {#if score !== undefined}
+                <span
+                    class="tabular-nums text-sm font-medium text-muted-foreground"
+                >
+                    {Math.round(score)}%
+                </span>
+            {/if}
+            <div class="flex items-center gap-1">
+                {#if family.source !== "google" && onfindsimilar}
                     <button
-                        onclick={revealInExplorer}
-                        title="Installed - show in Explorer"
-                        class="text-muted-foreground transition-colors hover:text-foreground"
+                        onclick={onfindsimilar}
+                        title="Find similar fonts"
+                        class="text-muted-foreground opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                     >
-                        <Check class="size-4 group-hover:hidden" />
-                        <FolderOpen class="hidden size-4 group-hover:block" />
-                    </button>
-                {:else if isInstalled}
-                    <span class="text-muted-foreground" title="Installed">
-                        <Check class="size-4" />
-                    </span>
-                {:else}
-                    <button
-                        onclick={install}
-                        disabled={installState === "installing"}
-                        title={installState === "error"
-                            ? "Install failed - click to retry"
-                            : "Install to Windows"}
-                        class="text-muted-foreground transition-all hover:text-foreground focus-visible:opacity-100 disabled:opacity-100
-                            {installState === 'idle'
-                            ? 'opacity-0 group-hover:opacity-100'
-                            : 'opacity-100'}"
-                    >
-                        {#if installState === "installing"}
-                            <LoaderCircle class="size-4 animate-spin" />
-                        {:else if installState === "error"}
-                            <TriangleAlert class="size-4" />
-                        {:else}
-                            <Download class="size-4" />
-                        {/if}
+                        <ScanSearch class="size-4" />
                     </button>
                 {/if}
-            {:else if fontPath}
-                <button
-                    onclick={revealInExplorer}
-                    title="Show in Explorer"
-                    class="text-muted-foreground opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                    <FolderOpen class="size-4" />
-                </button>
-            {/if}
+                {#if family.source === "google"}
+                    {#if isInstalled && fontPath}
+                        <button
+                            onclick={revealInExplorer}
+                            title="Installed - show in Explorer"
+                            class="text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                            <Check class="size-4 group-hover:hidden" />
+                            <FolderOpen
+                                class="hidden size-4 group-hover:block"
+                            />
+                        </button>
+                    {:else if isInstalled}
+                        <span class="text-muted-foreground" title="Installed">
+                            <Check class="size-4" />
+                        </span>
+                    {:else}
+                        <button
+                            onclick={install}
+                            disabled={installState === "installing"}
+                            title={installState === "error"
+                                ? "Install failed - click to retry"
+                                : "Install to Windows"}
+                            class="text-muted-foreground transition-all hover:text-foreground focus-visible:opacity-100 disabled:opacity-100
+                                {installState === 'idle'
+                                ? 'opacity-0 group-hover:opacity-100'
+                                : 'opacity-100'}"
+                        >
+                            {#if installState === "installing"}
+                                <LoaderCircle class="size-4 animate-spin" />
+                            {:else if installState === "error"}
+                                <TriangleAlert class="size-4" />
+                            {:else}
+                                <Download class="size-4" />
+                            {/if}
+                        </button>
+                    {/if}
+                {:else if fontPath}
+                    <button
+                        onclick={revealInExplorer}
+                        title="Show in Explorer"
+                        class="text-muted-foreground opacity-0 transition-all hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                        <FolderOpen class="size-4" />
+                    </button>
+                {/if}
+            </div>
         </div>
     </div>
     <div
