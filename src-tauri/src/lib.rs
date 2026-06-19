@@ -3,6 +3,7 @@ use fontdue::{Font as FontdueFont, FontSettings};
 use image_hasher::{HashAlg, Hasher, HasherConfig, ImageHash};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::ipc::Channel;
@@ -118,7 +119,7 @@ async fn install_google_font(family: String) -> Result<Vec<String>, String> {
         return Err("no installable font files found".into());
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     notify_font_change();
 
     Ok(installed)
@@ -170,7 +171,31 @@ fn install_font_file(filename: &str, bytes: &[u8]) -> Result<String, String> {
     Ok(dest.to_string_lossy().into_owned())
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn install_font_file(filename: &str, bytes: &[u8]) -> Result<String, String> {
+    let filename = Path::new(filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("invalid font filename")?;
+    let font_family = get_font_family(filename);
+    let data_home = match std::env::var_os("XDG_DATA_HOME") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => {
+            let home = std::env::var("HOME")
+                .map_err(|_| "could not determine home directory".to_string())?;
+            PathBuf::from(home).join(".local").join("share")
+        }
+    };
+    let font_path = data_home.join("fonts").join(font_family);
+    std::fs::create_dir_all(&font_path).map_err(|e| e.to_string())?;
+
+    let dest = font_path.join(filename);
+    std::fs::write(&dest, bytes).map_err(|e| e.to_string())?;
+ 
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn install_font_file(_filename: &str, _bytes: &[u8]) -> Result<String, String> {
     Err("Installing fonts is only supported on Windows".into())
 }
@@ -191,6 +216,12 @@ fn notify_font_change() {
             std::ptr::null_mut(),
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+fn notify_font_change() {
+    let _ = std::process::Command::new("fc-cache")
+        .output();
 }
 
 fn cancel_registry() -> &'static Mutex<HashMap<u64, Arc<AtomicBool>>> {
@@ -416,8 +447,26 @@ fn cancel_similarity(job_id: u64) {
     }
 }
 
+fn get_font_family(filename: &str) -> &str {
+    use std::path::Path;
+    let stem = Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(filename);
+    match stem.find(['-', '_']) {
+        Some(idx) => &stem[..idx],
+        None => stem,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")] // without this an error occurs on linux
+    {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
