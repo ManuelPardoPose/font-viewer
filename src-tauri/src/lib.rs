@@ -197,7 +197,7 @@ fn install_font_file(filename: &str, bytes: &[u8]) -> Result<String, String> {
 
 #[cfg(not(any(windows, target_os = "linux")))]
 fn install_font_file(_filename: &str, _bytes: &[u8]) -> Result<String, String> {
-    Err("Installing fonts is only supported on Windows".into())
+    Err("Installing fonts is only supported on Windows and Linux.".into())
 }
 
 #[cfg(windows)]
